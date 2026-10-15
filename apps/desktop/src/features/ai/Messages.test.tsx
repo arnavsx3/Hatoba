@@ -172,6 +172,57 @@ describe("a command's folder on the approval card (AI-17)", () => {
   });
 });
 
+describe("terminal key approval (AI-13)", () => {
+  const waiting = (args: Record<string, unknown>): Slot => ({
+    ...slot([user, { ...(reply("tool_calls") as Extract<AiEntryView, { role: "assistant" }>), tool_calls: [{ id: "keys_1", name: "send_input", arguments: JSON.stringify(args) }] }]),
+    turn: { ...newTurn(), phase: "tools", calls: [{ id: "keys_1", state: "approval" }] },
+  });
+  const click = (host: HTMLElement, text: string) => act(() => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)?.click());
+  const input = (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+    const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    act(() => {
+      Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(element, value);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  it("shows controls and every key, and preserves the bytes when text is left unedited", async () => {
+    const actions = await import("./actions");
+    const decide = vi.spyOn(actions, "decideCall").mockImplementation(() => {});
+    try {
+      const text = "\x18\x1b\\x18^X";
+      const host = mount(waiting({ text, key: "ctrl_c", keys: ["ctrl+x", "n"] }));
+      expect(host.textContent).toContain("^X\\e");
+      expect(host.textContent).toContain("Ctrl+C → Ctrl+X → n");
+      click(host, "Edit");
+      expect(host.querySelector("textarea")?.value).toBe("^X\\e\\\\x18\\^X");
+      const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
+      expect([...fields].map((field) => field.value)).toEqual(["ctrl_c", "ctrl+x", "n"]);
+      input(fields[1], "ctrl+o");
+      click(host, "Run");
+      expect(decide).toHaveBeenCalledOnce();
+      const decision = decide.mock.calls[0][1];
+      expect(decision.kind).toBe("run");
+      if (decision.kind !== "run") throw new Error("expected Run");
+      expect(JSON.parse(decision.edited!)).toEqual({ text, keys: ["ctrl_c", "ctrl+o", "n"] });
+    } finally {
+      decide.mockRestore();
+    }
+  });
+
+  it("adds/removes keys in order and refuses an invalid edited key", () => {
+    const host = mount(waiting({ keys: ["ctrl+x", "n"] }));
+    click(host, "Edit");
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove key"]')?.click());
+    click(host, "Add key");
+    const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
+    expect([...fields].map((field) => field.value)).toEqual(["n", "enter"]);
+    input(fields[1], "invalid_key");
+    click(host, "Run");
+    expect(host.textContent).toContain("Enter a valid key");
+  });
+});
+
 describe("calls that run together (§13.1)", () => {
   const read = (id: string, path: string): AiToolCall => ({ id, name: "read_file", arguments: JSON.stringify({ path }) });
   const calls = [read("call_1", "/etc/hosts"), read("call_2", "/etc/hostname"), read("call_3", "/etc/motd")];

@@ -698,6 +698,18 @@
   color: var(--fg2);
 }
 
+.keyRow {
+  flex-wrap: nowrap;
+}
+
+.keyRow label {
+  flex: none;
+}
+
+.keyRow .input {
+  flex: 1;
+}
+
 .fieldError {
   font-size: var(--text-xs);
   color: var(--red);

@@ -1,6 +1,7 @@
 import type { McpToolInfo } from "@/ipc/types";
 import { HIDDEN, type ShellDialect, windowsName } from "./commandRules";
 import type { ToolKind } from "./tools";
+import { keySequence, parseSendKey } from "./sendKeys";
 
 /**
  * AI-47: the hard rules of Auto mode. A call that manual approval would ask about goes to the judge first,
@@ -19,7 +20,7 @@ import type { ToolKind } from "./tools";
  * - any call after the user rejected an earlier call of the same response (`after_reject`, which the turn
  *   applies).
  *
- * A `send_input` call that submits a line (its text has a line break, or its key is Enter) is also checked
+ * A `send_input` call that submits a line (a line break, Enter, Ctrl+M, Ctrl+J or Ctrl+O in either key field) is also checked
  * with the cursor's line before it, so that a command split across calls is caught: `rm ` typed by one call
  * and `-rf /data` plus Enter by the next, or `shut` completed by Tab and then entered. The cursor's line
  * starts with the prompt, which {@link namedCommand} reads past.
@@ -92,14 +93,25 @@ export function hardRule({ kind, args, mcp, screen, dialect = "posix" }: HardRul
   const text = typeof value === "string" ? value : "";
   if (HIDDEN.test(text)) return { kind: "hidden" };
   if (kind === "run_command" && typeof args.workdir === "string" && HIDDEN.test(args.workdir)) return { kind: "hidden" };
-  if (kind !== "send_input" || !screen) return commandRule([text], dialect);
+  // Printable keys also type text. Keep their order when checking a command split across calls.
+  const keys = kind === "send_input" ? [args.key, ...(Array.isArray(args.keys) ? args.keys : [])].flatMap((key) => {
+    const parsed = parseSendKey(key);
+    if (parsed === null) return [];
+    const bytes = keySequence(parsed, false);
+    // Readline's Ctrl+O runs the current line too. Named controls are allowed keys, but their escape
+    // sequences must not hide a command word from the check (for example, shutdown followed by F10).
+    if (/[\r\n\x0f]/.test(bytes)) return ["\n"];
+    return HIDDEN.test(bytes) ? [] : [bytes];
+  }) : [];
+  const typed = text + keys.join("");
+  if (kind !== "send_input" || !screen) return commandRule([typed], dialect);
   const cursor = lastLine(screen);
   if (passwordPrompt(cursor)) return { kind: "password" };
-  if (!submits(args, text)) return commandRule([text], dialect);
+  if (!/[\r\n]/.test(typed)) return commandRule([typed], dialect);
   if (HIDDEN.test(cursor)) return { kind: "hidden" };
   // The line the shell receives: the text continues what the cursor's line holds, whose trailing spaces the
   // screen does not keep, so the two are joined both without and with a space.
-  return commandRule([text, cursor + text, `${cursor} ${text}`], dialect);
+  return commandRule([typed, cursor + typed, `${cursor} ${typed}`], dialect);
 }
 
 function commandRule(lines: readonly string[], dialect: ShellDialect): HardRule | null {
@@ -108,11 +120,6 @@ function commandRule(lines: readonly string[], dialect: ShellDialect): HardRule 
     if (command) return { kind: "command", command };
   }
   return null;
-}
-
-/** Whether a `send_input` call submits the line it types: its text has a line break, or its key is Enter. */
-function submits(args: Record<string, unknown>, text: string): boolean {
-  return text.includes("\n") || (typeof args.key === "string" && args.key.toLowerCase() === "enter");
 }
 
 /**

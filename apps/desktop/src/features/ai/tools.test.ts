@@ -151,16 +151,22 @@ describe("read_terminal arguments (AI-11)", () => {
 
 describe("send_input arguments (AI-13)", () => {
   it("parses text, key and wait with defaults and clamps", () => {
-    expect(parseSendInput('{"text":"ls -la","key":"enter"}')).toEqual({ ok: true, value: { text: "ls -la", key: "enter", waitSeconds: 10 } });
-    expect(parseSendInput('{"text":"q","wait_seconds":500}')).toEqual({ ok: true, value: { text: "q", key: null, waitSeconds: 120 } });
-    expect(parseSendInput('{"key":"CTRL_C","wait_seconds":0}')).toEqual({ ok: true, value: { text: "", key: "ctrl_c", waitSeconds: 1 } });
+    expect(parseSendInput('{"text":"ls -la","key":"enter"}')).toEqual({ ok: true, value: { text: "ls -la", keys: ["enter"], waitSeconds: 10 } });
+    expect(parseSendInput('{"text":"q","wait_seconds":500}')).toEqual({ ok: true, value: { text: "q", keys: [], waitSeconds: 120 } });
+    expect(parseSendInput('{"key":"CTRL_C","wait_seconds":0}')).toEqual({ ok: true, value: { text: "", keys: ["ctrl+C"], waitSeconds: 1 } });
   });
 
   it("rejects bad keys, bad types and empty input", () => {
-    expect(parseSendInput('{"text":"x","key":"f5"}').ok).toBe(false);
+    expect(parseSendInput('{"text":"x","key":"f13"}').ok).toBe(false);
     expect(parseSendInput('{"text":42}').ok).toBe(false);
     expect(parseSendInput("{}").ok).toBe(false);
     expect(parseSendInput('{"text":"x","wait_seconds":"soon"}').ok).toBe(false);
+  });
+
+  it("accepts ordered keys, retaining the legacy key before them", () => {
+    expect(parseSendInput('{"keys":["ctrl+x","n"]}')).toEqual({ ok: true, value: { text: "", keys: ["ctrl+x", "n"], waitSeconds: 10 } });
+    expect(parseSendInput('{"text":"x","key":"esc","keys":[":","w","q","enter"]}')).toEqual({ ok: true, value: { text: "x", keys: ["esc", ":", "w", "q", "enter"], waitSeconds: 10 } });
+    for (const keys of [null, "enter", ["enter", 1], ["enter", ""], ["enter", "not_a_key"], []]) expect(parseSendInput(JSON.stringify({ keys })).ok).toBe(false);
   });
 
   it("maps keys, following application cursor mode for arrows", () => {

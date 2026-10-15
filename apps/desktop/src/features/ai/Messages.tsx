@@ -1,7 +1,7 @@
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useApp } from "@/app/store";
 import { Button, Icon, IconButton, LinkButton, Spinner } from "@/components/controls";
-import { PopupSelect, toast } from "@/components/overlay";
+import { toast } from "@/components/overlay";
 import { readClipboard, writeClipboard } from "@/features/terminal/clipboard";
 import { formatDateTime, formatMessageTime, useT, useToday, type MessageKey } from "@/i18n";
 import type { AiAutoVerdict, AiEntryView, AiFileChange, AiFilePreview, AiFileRevert, AiToolCall, HostView, McpToolAnnotations, McpToolInfo } from "@/ipc/types";
@@ -36,6 +36,7 @@ import { noteLabel, noteTitle } from "./notes";
 import { replies as findReplies, type ReplyEnd } from "./replies";
 import { revertFailure } from "./revertText";
 import { sideRunning, type SideQuestion } from "./side";
+import { parseSendKey, readTerminalInput, showTerminalInput } from "./sendKeys";
 import { patchSlot, useAi, type Slot } from "./store";
 import {
   allowanceScope,
@@ -53,7 +54,6 @@ import {
   toolKind,
   toolLabel,
   type Scope,
-  type SendKey,
   type ToolKind,
 } from "./tools";
 import { callRevealKey, editedFiles, LOCAL_ENTRY, revealKey, type AutoAsk, type CallState, type LiveResponse } from "./turn";
@@ -79,7 +79,7 @@ const TOOL_ICON: Record<ToolKind, string> = {
   unknown: "question",
 };
 
-export const KEY_LABEL: Record<SendKey, MessageKey> = {
+export const KEY_LABEL: Record<string, MessageKey> = {
   enter: "ai.key.enter",
   tab: "ai.key.tab",
   esc: "ai.key.esc",
@@ -89,7 +89,21 @@ export const KEY_LABEL: Record<SendKey, MessageKey> = {
   down: "ai.key.down",
   left: "ai.key.left",
   right: "ai.key.right",
+  home: "ai.key.home",
+  end: "ai.key.end",
+  page_up: "ai.key.page_up",
+  page_down: "ai.key.page_down",
+  insert: "ai.key.insert",
+  delete: "ai.key.delete",
+  backspace: "ai.key.backspace",
+  space: "ai.key.space",
 };
+
+function keyLabel(key: string, t: ReturnType<typeof useT>): string {
+  const normalized = parseSendKey(key) ?? key;
+  const modifier: Record<string, string> = { ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
+  return normalized.split("+").map((part) => Object.hasOwn(KEY_LABEL, part) ? t(KEY_LABEL[part]) : Object.hasOwn(modifier, part) ? modifier[part] : /^f\d+$/.test(part) || normalized.startsWith("ctrl+") ? part.toUpperCase() : part).join("+");
+}
 
 /** Where a call stands, from its stored result or the turn (§9: tool running, waiting for approval, …). */
 type CallView =
@@ -1007,18 +1021,18 @@ interface Draft {
   /** A `run_command` call's directory; empty for the home directory. */
   dir: string;
   timeout: string;
-  key: SendKey | "";
+  keys: string[];
   wait: string;
 }
 
 function draftFrom(kind: ToolKind, args: Record<string, unknown>, json: string): Draft {
   const str = (v: unknown) => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
-  const none = { dir: "", timeout: "", key: "", wait: "" } as const;
+  const none = { dir: "", timeout: "", keys: [] as string[], wait: "" };
   switch (kind) {
     case "run_command":
       return { ...none, main: str(args.command), dir: str(args.workdir), timeout: str(args.timeout_seconds) };
     case "send_input":
-      return { ...none, main: str(args.text), key: (SEND_KEYS as readonly string[]).includes(str(args.key)) ? (str(args.key) as SendKey) : "", wait: str(args.wait_seconds) };
+      return { ...none, main: showTerminalInput(str(args.text)), keys: [...(args.key ? [str(args.key)] : []), ...(Array.isArray(args.keys) ? args.keys.map(str) : [])], wait: str(args.wait_seconds) };
     case "fetch_url":
       return { ...none, main: str(args.url) };
     // AI-39, AI-40: Edit changes the text the call writes; the diff follows.
@@ -1043,8 +1057,11 @@ function argsFrom(kind: ToolKind, base: Record<string, unknown>, d: Draft): { js
       const workdir = d.dir === "" && typeof base.workdir !== "string" ? undefined : d.dir;
       return { json: JSON.stringify(without({ ...base, command: d.main, workdir, timeout_seconds: num(d.timeout) })) };
     }
-    case "send_input":
-      return { json: JSON.stringify(without({ ...base, text: d.main, key: d.key || undefined, wait_seconds: num(d.wait) })) };
+    case "send_input": {
+      const keys = d.keys;
+      if (keys.some((key) => parseSendKey(key) === null)) return { error: true };
+      return { json: JSON.stringify(without({ ...base, text: readTerminalInput(d.main), key: undefined, keys: keys.length ? keys : undefined, wait_seconds: num(d.wait) })) };
+    }
     case "fetch_url":
       return { json: JSON.stringify({ ...base, url: d.main.trim() }) };
     case "edit_file":
@@ -1097,9 +1114,13 @@ function McpDetails({ mcp }: { mcp: McpToolInfo }) {
  * one presses Enter), the line count when there are several, and hidden characters (controls, bidirectional
  * overrides) as escapes, with a note that there are some.
  */
-function ShownInput({ text, command }: { text: string; command?: boolean }) {
+function ShownInput({ text, command, terminal }: { text: string; command?: boolean; terminal?: boolean }) {
   const t = useT();
-  const shown = useMemo(() => shownText(text), [text]);
+  const shown = useMemo(() => {
+    const input = terminal ? showTerminalInput(text, false) : text;
+    const shown = shownText(input);
+    return { ...shown, escaped: shown.escaped || input !== text };
+  }, [text, terminal]);
   const multiline = shown.lines.length > 1;
   return (
     <>
@@ -1337,7 +1358,8 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
               />
             </>
           )}
-          {invalid && <div className={s.fieldError}>{t("ai.approval.invalidJson")}</div>}
+          {kind === "send_input" && <div className={s.meta}>{t("ai.approval.terminalEscapes")}</div>}
+          {invalid && <div className={s.fieldError}>{t(kind === "send_input" ? "ai.approval.invalidKey" : "ai.approval.invalidJson")}</div>}
           {kind === "run_command" && (
             <label className={s.inline}>
               {t("ai.approval.workdir")}
@@ -1359,19 +1381,29 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
             </label>
           )}
           {kind === "send_input" && (
-            <div className={s.inline}>
-              {t("ai.approval.key")}
-              <PopupSelect<SendKey | "">
-                value={draft.key}
-                ariaLabel={t("ai.approval.key")}
-                options={[{ value: "", label: t("ai.key.none") }, ...SEND_KEYS.map((k) => ({ value: k, label: t(KEY_LABEL[k]) }))]}
-                onChange={(key) => setDraft({ ...draft, key })}
-              />
-              <span className={s.gap} />
-              {t("ai.approval.wait")}
-              <input className={cx(s.input, s.number)} type="number" min={1} max={120} placeholder="10" value={draft.wait} onChange={(e) => setDraft({ ...draft, wait: e.target.value })} />
-              {t("ai.approval.seconds")}
-            </div>
+            <>
+              {draft.keys.map((key, index, keys) => (
+                <div className={cx(s.inline, s.keyRow)} key={index}>
+                  <label htmlFor={`${call.id}-key-${index}`}>{t("ai.approval.keyNumber", { n: index + 1 })}</label>
+                  <input
+                    id={`${call.id}-key-${index}`}
+                    className={s.input}
+                    value={key}
+                    list={`${call.id}-keys`}
+                    spellCheck={false}
+                    onChange={(e) => { setInvalid(false); setDraft({ ...draft, keys: keys.map((k, i) => i === index ? e.target.value : k) }); }}
+                  />
+                  <IconButton icon="x" label={t("ai.approval.removeKey")} onClick={() => setDraft({ ...draft, keys: keys.filter((_, i) => i !== index) })} />
+                </div>
+              ))}
+              <datalist id={`${call.id}-keys`}>{SEND_KEYS.map((key) => <option key={key} value={key}>{keyLabel(key, t)}</option>)}</datalist>
+              <Button size="sm" icon="plus" onClick={() => setDraft({ ...draft, keys: [...draft.keys, "enter"] })}>{t("ai.approval.addKey")}</Button>
+              <div className={s.inline}>
+                {t("ai.approval.wait")}
+                <input className={cx(s.input, s.number)} type="number" min={1} max={120} placeholder="10" value={draft.wait} onChange={(e) => setDraft({ ...draft, wait: e.target.value })} />
+                {t("ai.approval.seconds")}
+              </div>
+            </>
           )}
           {fileChange && <FileChange state={file} replaceAll={args.replace_all === true} />}
         </div>
@@ -1386,9 +1418,9 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
           )}
           {kind === "send_input" && (
             <>
-              <ShownInput text={str(args.text) || " "} command />
+              <ShownInput text={str(args.text) || " "} command terminal />
               <div className={s.meta}>
-                {args.key ? t("ai.approval.thenKey", { key: (SEND_KEYS as readonly string[]).includes(str(args.key)) ? t(KEY_LABEL[str(args.key) as SendKey]) : str(args.key) }) : t("ai.approval.noKey")}
+                {args.key || (Array.isArray(args.keys) && args.keys.length) ? t("ai.approval.thenKey", { key: [args.key, ...(Array.isArray(args.keys) ? args.keys : [])].filter(Boolean).map((key) => keyLabel(str(key), t)).join(" → ") }) : t("ai.approval.noKey")}
                 {" · "}
                 {t("ai.approval.waitValue", { s: str(args.wait_seconds) || 10 })}
               </div>

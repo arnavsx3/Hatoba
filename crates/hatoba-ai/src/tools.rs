@@ -226,8 +226,14 @@ pub fn builtin_tools(set: &ToolSet) -> Vec<ToolDef> {
         tools.push(tool(
             SEND_INPUT,
             "Type text into the terminal tab's shell, the same way the keyboard does, then press \
-             `key` if given. The text is sent as it is, without a newline: to run a command, send \
-             its text with key \"enter\". Then wait until the output has been quiet for 1 second \
+             `keys` in order if given (or the single legacy `key`, before `keys` when both are \
+             given). Keys include ctrl+x, alt+f, shift+tab, f1-f12, home, end, page_up, page_down, \
+             insert, delete, backspace, enter, tab, esc, arrows and single printable characters. \
+             For example, keys [\"ctrl+x\", \"n\"] quits nano without saving. The text is sent \
+             as it is, without a newline: to run a command, send its text with keys [\"enter\"]. \
+             Invalid key names and hidden characters return an error listing the accepted notation, \
+             before anything is typed. To save and exit vim, use keys [\"esc\", \":\", \"w\", \"q\", \"enter\"]. \
+             Then wait until the output has been quiet for 1 second \
              or wait_seconds has passed (default 10, at most 120), and return the output that \
              appeared after the input, or the whole screen when a full-screen program is active. \
              The text goes to the shell itself, so commands use its working directory, \
@@ -243,8 +249,12 @@ pub fn builtin_tools(set: &ToolSet) -> Vec<ToolDef> {
                     },
                     "key": {
                         "type": "string",
-                        "enum": ["enter", "tab", "esc", "ctrl_c", "ctrl_d", "up", "down", "left", "right"],
-                        "description": "A key to press after the text."
+                        "description": "A single key after the text, before keys if both are supplied. Legacy ctrl_c and ctrl_d remain accepted."
+                    },
+                    "keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Keys to press in order after the text: ctrl+a through ctrl+z, alt+character, shift+tab, f1-f12, home, end, page_up, page_down, insert, delete, backspace, space, enter, tab, esc, arrows or a single printable character."
                     },
                     "wait_seconds": {
                         "type": "integer",
@@ -1866,12 +1876,14 @@ mod tests {
         assert!(workdir(ToolPlace::Ssh).contains("Windows server"));
         assert!(!workdir(ToolPlace::LocalWindows).contains("Windows server"));
         let send = &builtin_tools(&ALL)[2];
+        assert!(send.input_schema["properties"]["key"]["enum"].is_null());
+        assert_eq!(send.input_schema["properties"]["keys"]["type"], "array");
         assert_eq!(
-            send.input_schema["properties"]["key"]["enum"],
-            json!([
-                "enter", "tab", "esc", "ctrl_c", "ctrl_d", "up", "down", "left", "right"
-            ])
+            send.input_schema["properties"]["keys"]["items"]["type"],
+            "string"
         );
+        assert!(send.description.contains("ctrl+x"));
+        assert!(send.description.contains("single legacy `key`"));
         // The file tools (AI-38…40) say where a path starts, that they skip sudo, and their limits.
         let tools = builtin_tools(&ALL);
         let [read, edit, write] = [&tools[3], &tools[4], &tools[5]];
