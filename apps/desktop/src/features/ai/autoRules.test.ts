@@ -189,6 +189,11 @@ describe("the commands Auto always asks about in PowerShell and Command Prompt (
 });
 
 describe("a line send_input submits (AI-47)", () => {
+  it("asks before Backspace can turn harmless text into a destructive command", () => {
+    const args = { text: "shx", keys: ["backspace", ...Array.from("utdown"), "enter"] };
+    expect(hardRule({ kind: "send_input", args, screen: "$ " })).toEqual({ kind: "hidden" });
+  });
+
   it.each(["enter", "ctrl+m", "ctrl+j", "ctrl+o"])("checks the cursor's line when %s submits anywhere in keys", (key) => {
     for (const args of [{ key }, { keys: [key] }, { keys: [key, "n"] }, { text: "down", keys: [key, "n"] }]) {
       const cursor = args.text ? "$ shut" : "$ shutdown";
@@ -204,14 +209,24 @@ describe("a line send_input submits (AI-47)", () => {
       { text: "r", key: "m", keys: Array.from(" -rf /") },
     ]) expect(hardRule({ kind: "send_input", args })).toEqual({ kind: "command", command: "rm -r" });
     expect(hardRule({ kind: "send_input", args: { text: "ls ", keys: Array.from("/tmp") } })).toBeNull();
-    expect(hardRule({ kind: "send_input", args: { keys: ["ctrl+x", "n"] }, screen: "nano" })).toBeNull();
+    expect(hardRule({ kind: "send_input", args: { keys: ["shift+a", "space", "é", "界"] } })).toBeNull();
   });
 
-  it("does not let a named key's escape sequence hide a command word", () => {
-    for (const key of ["f10", "home", "backspace", "ctrl+x", "alt+f"]) {
-      expect(hardRule({ kind: "send_input", args: { text: "shutdown", keys: [key] } })).toEqual({ kind: "command", command: "shutdown" });
-      expect(hardRule({ kind: "send_input", args: { text: "shut", keys: ["d", "o", "w", "n", key, "enter"] } })).toEqual({ kind: "command", command: "shutdown" });
+  it.each(["posix", "powershell", "cmd"] as const)("asks before editing keys can change the %s command line", (dialect) => {
+    for (const key of ["backspace", "delete", "left", "right", "up", "down", "home", "end", "tab", "shift+tab", "esc", "f10", "ctrl+i", "ctrl+a", "ctrl+k", "ctrl+u", "ctrl+w", "ctrl+r", "ctrl+x", "ctrl_c", "ctrl_d", "alt+f"]) {
+      for (const args of [{ key }, { keys: [key] }, { text: "shx", keys: [key, ...Array.from("utdown"), "enter"] }]) {
+        expect(hardRule({ kind: "send_input", dialect, args }), key).toEqual({ kind: "hidden" });
+        expect(hardRule({ kind: "send_input", dialect, args, screen: "$ ls" }), key).toEqual({ kind: "hidden" });
+      }
     }
+  });
+
+  it.each(["alt+enter", "alt+ctrl+m", "alt+ctrl+j", "alt+ctrl+o"])("asks about %s instead of treating it as a plain submission", (key) => {
+    expect(hardRule({ kind: "send_input", args: { keys: [key] }, screen: "$ ls" })).toEqual({ kind: "hidden" });
+  });
+
+  it("asks before a tab in text can complete a command", () => {
+    expect(hardRule({ kind: "send_input", args: { text: "sudo shut\t\n" } })).toEqual({ kind: "hidden" });
   });
 
   it.each(["powershell", "cmd"] as const)("keeps ordered keys under the %s hard rules", (dialect) => {
@@ -240,7 +255,7 @@ describe("a line send_input submits (AI-47)", () => {
   });
 
   it("checks a line Tab completed when Enter submits it", () => {
-    expect(typed("kc@db1:~$ sudo shut", { text: "", key: "tab" })).toBeNull();
+    expect(typed("kc@db1:~$ sudo shut", { text: "", key: "tab" })).toEqual({ kind: "hidden" });
     expect(typed("kc@db1:~$ sudo shutdown", { key: "enter" })).toEqual({ kind: "command", command: "shutdown" });
   });
 

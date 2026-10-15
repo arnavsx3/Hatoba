@@ -300,6 +300,15 @@ describe("a turn in Auto mode (AI-47)", () => {
     expect(ipc.result.mock.calls[0][2]).toMatchObject({ status: "rejected", judged: false });
   });
 
+  it("requires approval for terminal editing keys even when the judge would allow the call", async () => {
+    ipc.judge.mockResolvedValue(verdict("run"));
+    await respond("auto", [call("call_1", "send_input", { text: "shx", keys: ["backspace", ...Array.from("utdown"), "enter"] })]);
+    await until(() => current()?.state === "approval");
+    expect(current()?.auto).toEqual({ rule: { kind: "hidden" } });
+    expect(ipc.judge).not.toHaveBeenCalled();
+    expect(ipc.run).not.toHaveBeenCalled();
+  });
+
   it("asks without the judge while the screen asks for a password, and gives the judge the screen otherwise", async () => {
     screen.rows = ["$ sudo apt upgrade", "[sudo] password for root:"];
     await respond("auto", [call("call_1", "send_input", { text: "hunter2", key: "enter" })]);

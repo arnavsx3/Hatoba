@@ -12,6 +12,8 @@ import { keySequence, parseSendKey } from "./sendKeys";
  * - a `run_command` command or directory, `send_input` text or string of an MCP call's arguments with hidden or
  *   bidirectional characters, which could show the judge and the user something other than what runs (an MCP
  *   call's strings may hold the tabs and line breaks of code and text: {@link MCP_HIDDEN});
+ * - `send_input` with Tab or non-submission control or escape sequences, since terminal editing can change
+ *   the command that runs;
  * - a `run_command` command, `send_input` text or MCP call's arguments that name one of
  *   {@link ALWAYS_ASK_COMMANDS}: an MCP call's strings at any depth, as its server may run them as a command;
  *   on a PowerShell or Command Prompt tab, a command or text that names one of {@link WINDOWS_ALWAYS_ASK_COMMANDS}
@@ -54,7 +56,7 @@ export type HardRule =
   | { kind: "mcp_always_ask" }
   /** The MCP call's tool cannot be found, so it asks in every mode (AI-31). */
   | { kind: "mcp_unknown" }
-  /** The command or its directory, the text or the MCP call's arguments have hidden or bidirectional characters. */
+  /** Hidden or bidirectional characters, or terminal editing controls whose effects cannot be checked. */
   | { kind: "hidden" }
   /** The command, the line the text submits or the MCP call's arguments name `command`: one of {@link ALWAYS_ASK_COMMANDS}, or `rm -r`. */
   | { kind: "command"; command: string }
@@ -91,19 +93,24 @@ export function hardRule({ kind, args, mcp, screen, dialect = "posix" }: HardRul
   if (kind !== "run_command" && kind !== "send_input") return null;
   const value = kind === "run_command" ? args.command : args.text;
   const text = typeof value === "string" ? value : "";
-  if (HIDDEN.test(text)) return { kind: "hidden" };
+  if (HIDDEN.test(text) || (kind === "send_input" && text.includes("\t"))) return { kind: "hidden" };
   if (kind === "run_command" && typeof args.workdir === "string" && HIDDEN.test(args.workdir)) return { kind: "hidden" };
   // Printable keys also type text. Keep their order when checking a command split across calls.
-  const keys = kind === "send_input" ? [args.key, ...(Array.isArray(args.keys) ? args.keys : [])].flatMap((key) => {
-    const parsed = parseSendKey(key);
-    if (parsed === null) return [];
-    const bytes = keySequence(parsed, false);
-    // Readline's Ctrl+O runs the current line too. Named controls are allowed keys, but their escape
-    // sequences must not hide a command word from the check (for example, shutdown followed by F10).
-    if (/[\r\n\x0f]/.test(bytes)) return ["\n"];
-    return HIDDEN.test(bytes) ? [] : [bytes];
-  }) : [];
-  const typed = text + keys.join("");
+  let typed = text;
+  if (kind === "send_input") {
+    for (const key of [args.key, ...(Array.isArray(args.keys) ? args.keys : [])]) {
+      const parsed = parseSendKey(key);
+      if (parsed === null) continue;
+      const bytes = keySequence(parsed, false);
+      // Readline's Ctrl+O runs the current line too. An escape-prefixed submission may also edit it,
+      // so only the exact submission bytes can use the cursor-line check.
+      if (bytes === "\r" || bytes === "\n" || bytes === "\x0f") typed += "\n";
+      else {
+        if (bytes === "\t" || HIDDEN.test(bytes)) return { kind: "hidden" };
+        typed += bytes;
+      }
+    }
+  }
   if (kind !== "send_input" || !screen) return commandRule([typed], dialect);
   const cursor = lastLine(screen);
   if (passwordPrompt(cursor)) return { kind: "password" };
