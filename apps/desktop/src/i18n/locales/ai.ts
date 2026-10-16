@@ -300,7 +300,7 @@ export default defineMessages({
     "ai.approval.addKey": "添加按键",
     "ai.approval.keyNumber": "按键 {n}",
     "ai.approval.invalidKey": "请输入有效按键，如 ctrl+x、alt+f 或 enter。",
-    "ai.approval.terminalEscapes": "^X 表示 Ctrl+X，\\e 表示 Esc。\\\\ 和 \\^ 保留原样的反斜杠和脱字符。",
+    "ai.approval.terminalEscapes": "控制字符显示为 ⟦^X⟧、⟦Esc⟧ 等标记。反斜杠和脱字符保持原样。",
     "ai.approval.removeKey": "删除按键",
 
     // turn states
@@ -801,7 +801,7 @@ export default defineMessages({
     "ai.approval.addKey": "Add key",
     "ai.approval.keyNumber": "Key {n}",
     "ai.approval.invalidKey": "Enter a valid key, such as ctrl+x, alt+f or enter.",
-    "ai.approval.terminalEscapes": "^X means Ctrl+X; \\e means Esc. \\\\ and \\^ keep a literal backslash and caret.",
+    "ai.approval.terminalEscapes": "Controls appear as ⟦^X⟧, ⟦Esc⟧ and similar markers. Backslashes and carets stay literal.",
     "ai.approval.removeKey": "Remove key",
 
 
@@ -1297,7 +1297,7 @@ export default defineMessages({
     "ai.approval.addKey": "キーを追加",
     "ai.approval.keyNumber": "キー {n}",
     "ai.approval.invalidKey": "ctrl+x、alt+f、enter などの有効なキーを入力してください。",
-    "ai.approval.terminalEscapes": "^X は Ctrl+X、\\e は Esc です。\\\\ と \\^ はバックスラッシュとキャレットをそのまま入力します。",
+    "ai.approval.terminalEscapes": "制御文字は ⟦^X⟧、⟦Esc⟧ などの記号で表示されます。バックスラッシュとキャレットはそのまま入力されます。",
     "ai.approval.removeKey": "キーを削除",
 
 

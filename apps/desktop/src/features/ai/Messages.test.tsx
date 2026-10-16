@@ -199,6 +199,7 @@ describe("terminal key approval (AI-13)", () => {
       expect(host.textContent).toContain("Ctrl+C → Ctrl+X → n");
       click(host, "Edit");
       expect(host.querySelector("textarea")?.value).toBe("⟦^X⟧⟦Esc⟧\\x18^X");
+      expect(host.textContent).toContain("Backslashes and carets stay literal.");
       const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
       expect([...fields].map((field) => field.value)).toEqual(["ctrl_c", "ctrl+x", "n"]);
       input(fields[1], "ctrl+o");
