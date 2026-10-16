@@ -169,6 +169,22 @@ describe("send_input arguments (AI-13)", () => {
     for (const keys of [null, "enter", ["enter", 1], ["enter", ""], ["enter", "not_a_key"], []]) expect(parseSendInput(JSON.stringify({ keys })).ok).toBe(false);
   });
 
+  it("treats optional null fields as absent", () => {
+    expect(parseSendInput('{"text":"ls","key":null,"keys":null}')).toEqual({ ok: true, value: { text: "ls", keys: [], waitSeconds: 10 } });
+    expect(parseSendInput('{"text":null,"key":"enter","keys":null}')).toEqual({ ok: true, value: { text: "", keys: ["enter"], waitSeconds: 10 } });
+    expect(parseSendInput('{"keys":null}').ok).toBe(false);
+  });
+
+  it("names the unsupported entry and lists the accepted notation", () => {
+    for (const args of [{ key: "pagedown" }, { keys: ["enter", "pagedown"] }]) {
+      const result = parseSendInput(JSON.stringify(args));
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected an invalid key");
+      expect(result.error).toContain('Unsupported key "pagedown"');
+      expect(result.error).toContain("page_down");
+    }
+  });
+
   it("maps keys, following application cursor mode for arrows", () => {
     expect(keySequence("enter", false)).toBe("\r");
     expect(keySequence("tab", false)).toBe("\t");

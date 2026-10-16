@@ -18,6 +18,7 @@ describe("send_input terminal delivery", () => {
     [{ keys: ["ctrl+x", "n"] }, "\x18n"],
     [{ keys: ["alt++", "+", "N"] }, "\x1b++N"],
     [{ text: "nano /tmp/example", key: "enter" }, "nano /tmp/example\r"],
+    [{ text: "ls", key: null, keys: null }, "ls"],
     [{ key: "esc", keys: [":", "w", "q", "enter"] }, "\x1b:wq\r"],
     [{ keys: ["home", "f10"] }, "\x1bOH\x1b[21~"],
   ])("sends text and keys in order through the existing keyboard path", async (args, bytes) => {

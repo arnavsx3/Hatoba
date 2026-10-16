@@ -454,14 +454,14 @@ export function parseSendInput(json: string): Parsed<SendInputArgs> {
   const keys: SendKey[] = [];
   if (args.key !== undefined && args.key !== null && args.key !== "") {
     const key = parseSendKey(args.key);
-    if (key === null) return { ok: false, error: `Unsupported "key". Use ${SEND_KEY_NOTATION}. Legacy ctrl_c and ctrl_d also work.` };
+    if (key === null) return { ok: false, error: `Unsupported key ${JSON.stringify(args.key)}. Use ${SEND_KEY_NOTATION}. Legacy ctrl_c and ctrl_d also work.` };
     keys.push(key);
   }
-  if (args.keys !== undefined) {
+  if (args.keys !== undefined && args.keys !== null) {
     if (!Array.isArray(args.keys)) return { ok: false, error: '"keys" must be an array of terminal keys.' };
     for (const value of args.keys) {
       const key = parseSendKey(value);
-      if (key === null) return { ok: false, error: `Unsupported item in "keys". Use ${SEND_KEY_NOTATION}.` };
+      if (key === null) return { ok: false, error: `Unsupported key ${JSON.stringify(value)} in "keys". Use ${SEND_KEY_NOTATION}.` };
       keys.push(key);
     }
   }
@@ -481,7 +481,7 @@ export function callSummary(name: string, json: string): string {
     case "run_command":
       return firstLine(str(args.command));
     case "send_input":
-      return [showTerminalInput(str(args.text), false).replace(/\n/g, "⏎"), ...[args.key, ...(Array.isArray(args.keys) ? args.keys : [])].filter(Boolean).map((k) => `[${str(k)}]`)].filter(Boolean).join(" ");
+      return [showTerminalInput(str(args.text)).replace(/\n/g, "⏎"), ...[args.key, ...(Array.isArray(args.keys) ? args.keys : [])].filter(Boolean).map((k) => `[${str(k)}]`)].filter(Boolean).join(" ");
     case "web_search":
       return str(args.query);
     case "fetch_url":

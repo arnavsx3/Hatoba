@@ -40,10 +40,21 @@ describe("terminal keyboard encoding (AI-13)", () => {
 
   it("shows controls reversibly without treating a literal backslash escape as input", () => {
     const text = "\x18\x1b\t\r\0\x7f\n\\x18\\e\\n^X";
-    expect(showTerminalInput(text)).toBe("^X\\e\\t\\r^@\\x7f\n\\\\x18\\\\e\\\\n\\^X");
-    expect(readTerminalInput(showTerminalInput(text))).toBe(text);
+    expect(showTerminalInput(text)).toBe("⟦^X⟧⟦Esc⟧⟦Tab⟧⟦CR⟧⟦^@⟧⟦DEL⟧\n\\x18\\e\\n^X");
+    expect(readTerminalInput(showTerminalInput(text), text)).toBe(text);
     const controls = Array.from({ length: 160 }, (_, i) => String.fromCharCode(i)).join("");
-    expect(readTerminalInput(showTerminalInput(controls))).toBe(controls);
-    expect(showTerminalInput("printf '\\n'\x18", false)).toBe("printf '\\n'^X");
+    expect(readTerminalInput(showTerminalInput(controls), controls)).toBe(controls);
+    expect(showTerminalInput("printf '\\n'\x18")).toBe("printf '\\n'⟦^X⟧");
+  });
+
+  it("keeps typed paths, regular expressions and literal control markers unchanged", () => {
+    for (const text of ["cd C:\\temp", "grep '^Error' log", "\\t\\r\\e\\x18^@^_", "⟦Esc⟧⟦⟦Tab⟧"]) {
+      expect(showTerminalInput(text)).toBe(text);
+      if (!text.startsWith("⟦")) expect(readTerminalInput(text, "")).toBe(text);
+      expect(readTerminalInput(showTerminalInput(text), text)).toBe(text);
+    }
+    const text = "literal ⟦Esc⟧ with control \x1b";
+    expect(showTerminalInput(text)).toBe("literal ⟦Esc⟧ with control ⟦⟦Esc⟧");
+    expect(readTerminalInput(showTerminalInput(text), text)).toBe(text);
   });
 });

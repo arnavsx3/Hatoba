@@ -191,7 +191,7 @@ describe("the commands Auto always asks about in PowerShell and Command Prompt (
 describe("a line send_input submits (AI-47)", () => {
   it("asks before Backspace can turn harmless text into a destructive command", () => {
     const args = { text: "shx", keys: ["backspace", ...Array.from("utdown"), "enter"] };
-    expect(hardRule({ kind: "send_input", args, screen: "$ " })).toEqual({ kind: "hidden" });
+    expect(hardRule({ kind: "send_input", args, screen: "$ " })).toEqual({ kind: "editing_submission" });
   });
 
   it.each(["enter", "ctrl+m", "ctrl+j", "ctrl+o"])("checks the cursor's line when %s submits anywhere in keys", (key) => {
@@ -212,21 +212,40 @@ describe("a line send_input submits (AI-47)", () => {
     expect(hardRule({ kind: "send_input", args: { keys: ["shift+a", "space", "é", "界"] } })).toBeNull();
   });
 
-  it.each(["posix", "powershell", "cmd"] as const)("asks before editing keys can change the %s command line", (dialect) => {
-    for (const key of ["backspace", "delete", "left", "right", "up", "down", "home", "end", "tab", "shift+tab", "esc", "f10", "ctrl+i", "ctrl+a", "ctrl+k", "ctrl+u", "ctrl+w", "ctrl+r", "ctrl+x", "ctrl_c", "ctrl_d", "alt+f"]) {
-      for (const args of [{ key }, { keys: [key] }, { text: "shx", keys: [key, ...Array.from("utdown"), "enter"] }]) {
-        expect(hardRule({ kind: "send_input", dialect, args }), key).toEqual({ kind: "hidden" });
-        expect(hardRule({ kind: "send_input", dialect, args, screen: "$ ls" }), key).toEqual({ kind: "hidden" });
+  it.each(["posix", "powershell", "cmd"] as const)("asks only when editing precedes submission on a %s command line", (dialect) => {
+    for (const key of ["backspace", "delete", "left", "right", "up", "down", "home", "end", "tab", "shift+tab", "esc", "f10", "ctrl+i", "ctrl+a", "ctrl+k", "ctrl+u", "ctrl+w", "ctrl+r", "ctrl+x", "ctrl_c", "ctrl_d", "alt+f", "alt+ctrl+o"]) {
+      for (const args of [{ key }, { keys: [key] }, { keys: ["enter", key] }]) {
+        expect(hardRule({ kind: "send_input", dialect, args }), key).toBeNull();
+        expect(hardRule({ kind: "send_input", dialect, args, screen: "$ ls" }), key).toBeNull();
+      }
+      for (const submit of ["enter", "ctrl+m", "ctrl+j", "ctrl+o"]) {
+        for (const args of [{ key, keys: [submit] }, { text: "shx", keys: [key, ...Array.from("utdown"), submit] }]) {
+          expect(hardRule({ kind: "send_input", dialect, args }), key).toEqual({ kind: "editing_submission" });
+        }
       }
     }
   });
 
-  it.each(["alt+enter", "alt+ctrl+m", "alt+ctrl+j", "alt+ctrl+o"])("asks about %s instead of treating it as a plain submission", (key) => {
-    expect(hardRule({ kind: "send_input", args: { keys: [key] }, screen: "$ ls" })).toEqual({ kind: "hidden" });
+  it.each(["alt+enter", "alt+ctrl+m", "alt+ctrl+j"])("asks about %s instead of treating it as a plain submission", (key) => {
+    expect(hardRule({ kind: "send_input", args: { keys: [key] }, screen: "$ ls" })).toEqual({ kind: "editing_submission" });
   });
 
   it("asks before a tab in text can complete a command", () => {
-    expect(hardRule({ kind: "send_input", args: { text: "sudo shut\t\n" } })).toEqual({ kind: "hidden" });
+    expect(hardRule({ kind: "send_input", args: { text: "sudo shut\t\n" } })).toEqual({ kind: "editing_submission" });
+    expect(hardRule({ kind: "send_input", args: { text: "ls\t" } })).toBeNull();
+    expect(hardRule({ kind: "send_input", args: { text: "ls\n\t" } })).toBeNull();
+    expect(hardRule({ kind: "send_input", args: { text: "ls\t", keys: ["enter"] } })).toEqual({ kind: "editing_submission" });
+  });
+
+  it("keeps printable commands in the check when an editing key follows them", () => {
+    expect(hardRule({ kind: "send_input", args: { keys: [...Array.from("rm -rf /"), "home"] } })).toEqual({ kind: "command", command: "rm -r" });
+    expect(hardRule({ kind: "send_input", args: { keys: ["ctrl+x", "n"] }, screen: "nano" })).toBeNull();
+    expect(hardRule({ kind: "send_input", args: { keys: ["f10"] }, screen: "htop" })).toBeNull();
+  });
+
+  it("checks history recalled by an earlier call when the next call submits it", () => {
+    expect(hardRule({ kind: "send_input", args: { keys: ["up"] }, screen: "$ " })).toBeNull();
+    expect(hardRule({ kind: "send_input", args: { keys: ["enter"] }, screen: "$ sudo reboot" })).toEqual({ kind: "command", command: "reboot" });
   });
 
   it.each(["powershell", "cmd"] as const)("keeps ordered keys under the %s hard rules", (dialect) => {
@@ -255,7 +274,7 @@ describe("a line send_input submits (AI-47)", () => {
   });
 
   it("checks a line Tab completed when Enter submits it", () => {
-    expect(typed("kc@db1:~$ sudo shut", { text: "", key: "tab" })).toEqual({ kind: "hidden" });
+    expect(typed("kc@db1:~$ sudo shut", { text: "", key: "tab" })).toBeNull();
     expect(typed("kc@db1:~$ sudo shutdown", { key: "enter" })).toEqual({ kind: "command", command: "shutdown" });
   });
 

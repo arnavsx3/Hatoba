@@ -64,32 +64,35 @@ export function keySequence(key: SendKey, applicationCursor: boolean): string {
   return encodeKey(base, parts, applicationCursor)!;
 }
 
-/** Visible, reversible notation for terminal controls, including in the approval editor. */
-export function showTerminalInput(text: string, escapeBackslashes = true): string {
-  return text.replace(/[\\^\x00-\x09\x0b-\x1f\x7f-\x9f]/g, (c) => {
-    if (c === "\\") return escapeBackslashes ? "\\\\" : "\\";
-    if (c === "^") return escapeBackslashes ? "\\^" : "^";
-    if (c === "\x1b") return "\\e";
-    if (c === "\t") return "\\t";
-    if (c === "\r") return "\\r";
-    if (c === "\x7f") return "\\x7f";
-    if (c.charCodeAt(0) < 32) return `^${String.fromCharCode(c.charCodeAt(0) + 64)}`;
-    return `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`;
+/** Pick a control marker absent from the source so literal markers also round-trip unchanged. */
+function controlPrefix(source: string): string {
+  let prefix = "⟦";
+  while (source.includes(prefix)) prefix += "⟦";
+  return prefix;
+}
+
+/** Only control characters are marked; printable text, backslashes and carets stay literal. */
+export function showTerminalInput(text: string): string {
+  const prefix = controlPrefix(text);
+  return text.replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, (c) => {
+    const code = c.charCodeAt(0);
+    const token = c === "\x1b" ? "Esc" : c === "\t" ? "Tab" : c === "\r" ? "CR" : c === "\x7f" ? "DEL"
+      : code < 32 ? `^${String.fromCharCode(code + 64)}` : `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
+    return `${prefix}${token}⟧`;
   });
 }
 
-/** Decode only the explicit escapes shown by showTerminalInput; other backslashes remain literal. */
-export function readTerminalInput(text: string): string {
-  return text.replace(/\\(\\|\^|e|t|r|x[0-9a-f]{2})|\^([@A-Z[\\\]^_])/g, (_, escape: string | undefined, control: string | undefined) => {
-    if (control) return String.fromCharCode(control.charCodeAt(0) - 64);
-    if (escape === undefined) return "";
-    switch (escape.toLowerCase()) {
-      case "\\": return "\\";
-      case "^": return "^";
-      case "e": return "\x1b";
-      case "t": return "\t";
-      case "r": return "\r";
-      default: return String.fromCharCode(parseInt(escape.slice(1), 16));
+/** Decode marked controls using the original text's prefix; ordinary typed escapes stay literal. */
+export function readTerminalInput(text: string, original: string): string {
+  return text.replace(new RegExp(`${controlPrefix(original)}([^⟧]+)⟧`, "g"), (marker, token: string) => {
+    switch (token) {
+      case "Esc": return "\x1b";
+      case "Tab": return "\t";
+      case "CR": return "\r";
+      case "DEL": return "\x7f";
     }
+    if (/^\^[@-_]$/.test(token)) return String.fromCharCode(token.charCodeAt(1) - 64);
+    if (/^U\+00[89][0-9A-F]$/.test(token)) return String.fromCharCode(parseInt(token.slice(2), 16));
+    return marker;
   });
 }

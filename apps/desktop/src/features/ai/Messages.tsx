@@ -83,8 +83,6 @@ export const KEY_LABEL: Record<string, MessageKey> = {
   enter: "ai.key.enter",
   tab: "ai.key.tab",
   esc: "ai.key.esc",
-  ctrl_c: "ai.key.ctrl_c",
-  ctrl_d: "ai.key.ctrl_d",
   up: "ai.key.up",
   down: "ai.key.down",
   left: "ai.key.left",
@@ -97,6 +95,7 @@ export const KEY_LABEL: Record<string, MessageKey> = {
   delete: "ai.key.delete",
   backspace: "ai.key.backspace",
   space: "ai.key.space",
+  " ": "ai.key.space",
 };
 
 function keyLabel(key: string, t: ReturnType<typeof useT>): string {
@@ -1060,7 +1059,7 @@ function argsFrom(kind: ToolKind, base: Record<string, unknown>, d: Draft): { js
     case "send_input": {
       const keys = d.keys;
       if (keys.some((key) => parseSendKey(key) === null)) return { error: true };
-      return { json: JSON.stringify(without({ ...base, text: readTerminalInput(d.main), key: undefined, keys: keys.length ? keys : undefined, wait_seconds: num(d.wait) })) };
+      return { json: JSON.stringify(without({ ...base, text: readTerminalInput(d.main, typeof base.text === "string" ? base.text : ""), key: undefined, keys: keys.length ? keys : undefined, wait_seconds: num(d.wait) })) };
     }
     case "fetch_url":
       return { json: JSON.stringify({ ...base, url: d.main.trim() }) };
@@ -1117,7 +1116,7 @@ function McpDetails({ mcp }: { mcp: McpToolInfo }) {
 function ShownInput({ text, command, terminal }: { text: string; command?: boolean; terminal?: boolean }) {
   const t = useT();
   const shown = useMemo(() => {
-    const input = terminal ? showTerminalInput(text, false) : text;
+    const input = terminal ? showTerminalInput(text) : text;
     const shown = shownText(input);
     return { ...shown, escaped: shown.escaped || input !== text };
   }, [text, terminal]);

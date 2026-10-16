@@ -141,6 +141,9 @@ describe("Auto mode on calls (AI-47)", () => {
     expect(render(waiting({ id: "call_1", state: "approval", auto: { rule: { kind: "after_reject" } } }))).toContain(
       "You rejected an earlier call in this reply, so Auto asks about the rest of it.",
     );
+    expect(render(waiting({ id: "call_1", state: "approval", auto: { rule: { kind: "editing_submission" } } }))).toContain(
+      "This call edits and then submits the terminal line. Auto needs you to check the resulting command.",
+    );
     const unavailable = render(waiting({ id: "call_1", state: "approval", auto: { verdict: verdict("ask", [], "unavailable") } }));
     expect(unavailable).toContain("Auto could not judge this call: no judge is available. Choose one in Settings → AI.");
     expect(unavailable).toContain("Open Settings → AI");
@@ -192,10 +195,10 @@ describe("terminal key approval (AI-13)", () => {
     try {
       const text = "\x18\x1b\\x18^X";
       const host = mount(waiting({ text, key: "ctrl_c", keys: ["ctrl+x", "n"] }));
-      expect(host.textContent).toContain("^X\\e");
+      expect(host.textContent).toContain("⟦^X⟧⟦Esc⟧");
       expect(host.textContent).toContain("Ctrl+C → Ctrl+X → n");
       click(host, "Edit");
-      expect(host.querySelector("textarea")?.value).toBe("^X\\e\\\\x18\\^X");
+      expect(host.querySelector("textarea")?.value).toBe("⟦^X⟧⟦Esc⟧\\x18^X");
       const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
       expect([...fields].map((field) => field.value)).toEqual(["ctrl_c", "ctrl+x", "n"]);
       input(fields[1], "ctrl+o");
@@ -208,6 +211,27 @@ describe("terminal key approval (AI-13)", () => {
     } finally {
       decide.mockRestore();
     }
+  });
+
+  it.each(["cd C:\\temp", "grep '^Error' log"])("sends %s exactly as typed in the editor", async (text) => {
+    const actions = await import("./actions");
+    const decide = vi.spyOn(actions, "decideCall").mockImplementation(() => {});
+    try {
+      const host = mount(waiting({ text: "ls", key: "enter" }));
+      click(host, "Edit");
+      input(host.querySelector("textarea")!, text);
+      click(host, "Run");
+      const decision = decide.mock.calls[0][1];
+      expect(decision.kind).toBe("run");
+      if (decision.kind !== "run") throw new Error("expected Run");
+      expect(JSON.parse(decision.edited!).text).toBe(text);
+    } finally {
+      decide.mockRestore();
+    }
+  });
+
+  it("labels both a literal space and the named space key", () => {
+    expect(render(waiting({ keys: [" ", "space"] }))).toContain("Then press Space → Space");
   });
 
   it("adds/removes keys in order and refuses an invalid edited key", () => {
