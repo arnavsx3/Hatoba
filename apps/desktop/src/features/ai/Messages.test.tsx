@@ -142,7 +142,7 @@ describe("Auto mode on calls (AI-47)", () => {
       "You rejected an earlier call in this reply, so Auto asks about the rest of it.",
     );
     expect(render(waiting({ id: "call_1", state: "approval", auto: { rule: { kind: "editing_submission" } } }))).toContain(
-      "This call edits and then submits the terminal line. Auto needs you to check the resulting command.",
+      "Auto always asks when the input edits the terminal's line and then submits it.",
     );
     const unavailable = render(waiting({ id: "call_1", state: "approval", auto: { verdict: verdict("ask", [], "unavailable") } }));
     expect(unavailable).toContain("Auto could not judge this call: no judge is available. Choose one in Settings → AI.");
@@ -196,13 +196,14 @@ describe("terminal key approval (AI-13)", () => {
       const text = "\x18\x1b\\x18^X";
       const host = mount(waiting({ text, key: "ctrl_c", keys: ["ctrl+x", "n"] }));
       expect(host.textContent).toContain("⟦^X⟧⟦Esc⟧");
-      expect(host.textContent).toContain("Ctrl+C → Ctrl+X → n");
+      expect([...host.querySelectorAll('[role="listitem"]')].map((e) => e.textContent)).toEqual(["Ctrl+C", "Ctrl+X", "n"]);
       click(host, "Edit");
       expect(host.querySelector("textarea")?.value).toBe("⟦^X⟧⟦Esc⟧\\x18^X");
-      expect(host.textContent).toContain("Backslashes and carets stay literal.");
-      const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
-      expect([...fields].map((field) => field.value)).toEqual(["ctrl_c", "ctrl+x", "n"]);
-      input(fields[1], "ctrl+o");
+      expect(host.textContent).toContain("Controls appear as ⟦^X⟧, ⟦Esc⟧ and similar markers.");
+      act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Edit key 2: Ctrl+X"]')?.click());
+      const field = host.querySelector<HTMLInputElement>("input[list]")!;
+      expect(field.value).toBe("ctrl+x");
+      input(field, "ctrl+o");
       click(host, "Run");
       expect(decide).toHaveBeenCalledOnce();
       const decision = decide.mock.calls[0][1];
@@ -231,21 +232,96 @@ describe("terminal key approval (AI-13)", () => {
     }
   });
 
-  it("labels both a literal space and the named space key", () => {
-    expect(render(waiting({ keys: [" ", "space"] }))).toContain("Then press Space → Space");
+  const byLabel = (host: HTMLElement, label: string) => act(() => {
+    const button = [...host.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === label);
+    expect(button, label).toBeDefined();
+    button!.click();
+  });
+  const finishKey = (host: HTMLElement) => act(() => {
+    host.querySelector("input[list]")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
 
-  it("adds/removes keys in order and refuses an invalid edited key", () => {
-    const host = mount(waiting({ keys: ["ctrl+x", "n"] }));
+  it("shows Space in both the view and editor, including while editing a literal space", () => {
+    const host = mount(waiting({ keys: [" ", "space"] }));
+    expect([...host.querySelectorAll('[role="listitem"]')].map((e) => e.textContent)).toEqual(["Space", "Space"]);
     click(host, "Edit");
-    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove key"]')?.click());
-    click(host, "Add key");
-    const fields = host.querySelectorAll<HTMLInputElement>("input[list]");
-    expect([...fields].map((field) => field.value)).toEqual(["n", "enter"]);
-    input(fields[1], "invalid_key");
-    click(host, "Run");
-    expect(host.textContent).toContain("Enter a valid key");
+    byLabel(host, "Edit key 1: Space");
+    expect(host.querySelector<HTMLInputElement>("input[list]")?.value).toBe("Space");
   });
+
+  it("keeps Right distinct from the boundaries between key tokens", () => {
+    const host = mount(waiting({ keys: ["up", "right", "enter"] }));
+    expect([...host.querySelectorAll('[role="listitem"]')].map((e) => e.textContent)).toEqual(["↑", "→", "Enter"]);
+    expect(host.textContent?.match(/→/g)).toHaveLength(1);
+  });
+
+  it("inserts at the beginning, middle and end and removes any key without changing the order", async () => {
+    const actions = await import("./actions");
+    const decide = vi.spyOn(actions, "decideCall").mockImplementation(() => {});
+    try {
+      const host = mount(waiting({ keys: ["ctrl+x", "n"] }));
+      click(host, "Edit");
+      byLabel(host, "Remove key 1");
+      byLabel(host, "Insert key at position 1");
+      input(host.querySelector<HTMLInputElement>("input[list]")!, "esc");
+      finishKey(host);
+      byLabel(host, "Insert key at position 2");
+      input(host.querySelector<HTMLInputElement>("input[list]")!, " ");
+      finishKey(host);
+      byLabel(host, "Insert key at position 4");
+      expect(host.querySelector<HTMLInputElement>("input[list]")?.value).toBe("");
+      input(host.querySelector<HTMLInputElement>("input[list]")!, "enter");
+      click(host, "Run");
+      const decision = decide.mock.calls[0][1];
+      expect(decision.kind).toBe("run");
+      if (decision.kind !== "run") throw new Error("expected Run");
+      expect(JSON.parse(decision.edited!).keys).toEqual(["esc", " ", "n", "enter"]);
+    } finally {
+      decide.mockRestore();
+    }
+  });
+
+  it("marks an invalid key on its own chip and blocks execution while a key is incomplete", async () => {
+    const actions = await import("./actions");
+    const decide = vi.spyOn(actions, "decideCall").mockImplementation(() => {});
+    try {
+      const host = mount(waiting({ keys: ["ctrl+x", "n"] }));
+      click(host, "Edit");
+      byLabel(host, "Edit key 2: n");
+      input(host.querySelector<HTMLInputElement>("input[list]")!, "invalid_key");
+      click(host, "Run");
+      expect(host.querySelector('[aria-label="Key 2"]')?.getAttribute("aria-invalid")).toBe("true");
+      expect(host.querySelectorAll('[aria-invalid="true"]')).toHaveLength(1);
+      expect(host.textContent).toContain("Enter a valid key");
+      expect(decide).not.toHaveBeenCalled();
+      input(host.querySelector<HTMLInputElement>("input[list]")!, "enter");
+      finishKey(host);
+      byLabel(host, "Insert key at position 1");
+      click(host, "Run");
+      expect(host.querySelector('[aria-label="Key 1"]')?.getAttribute("aria-invalid")).toBe("true");
+      expect(decide).not.toHaveBeenCalled();
+    } finally {
+      decide.mockRestore();
+    }
+  });
+
+  it("shows the control hint only while the edited text has a recognized marker", () => {
+    const host = mount(waiting({ text: "ls", keys: ["enter"] }));
+    click(host, "Edit");
+    expect(host.textContent).not.toContain("Controls appear");
+    input(host.querySelector("textarea")!, "⟦Esc⟧");
+    expect(host.textContent).toContain("Controls appear");
+    expect(host.textContent).not.toContain("Backslashes and carets");
+    input(host.querySelector("textarea")!, "ls");
+    expect(host.textContent).not.toContain("Controls appear");
+  });
+
+  it("does not explain literal marker text as a control", () => {
+    const host = mount(waiting({ text: "literal ⟦Esc⟧", keys: ["enter"] }));
+    click(host, "Edit");
+    expect(host.textContent).not.toContain("Controls appear");
+  });
+
 });
 
 describe("calls that run together (§13.1)", () => {

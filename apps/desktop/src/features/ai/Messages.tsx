@@ -104,6 +104,76 @@ function keyLabel(key: string, t: ReturnType<typeof useT>): string {
   return normalized.split("+").map((part) => Object.hasOwn(KEY_LABEL, part) ? t(KEY_LABEL[part]) : Object.hasOwn(modifier, part) ? modifier[part] : /^f\d+$/.test(part) || normalized.startsWith("ctrl+") ? part.toUpperCase() : part).join("+");
 }
 
+/** Separate key tokens visually, so a navigation key cannot be mistaken for a separator. */
+function KeySequence({ keys }: { keys: string[] }) {
+  const t = useT();
+  const [before, after] = t("ai.approval.thenKey", { key: "\uFFFC" }).split("\uFFFC");
+  return <>{before}<span className={s.keySequenceView} role="list" aria-label={t("ai.approval.keySequence")}>
+    {keys.map((key, index) => <span key={index} className={cx(s.keyToken, s.keyLabel)} role="listitem">{keyLabel(key, t)}</span>)}
+  </span>{after}</>;
+}
+
+/** Editing writes into the draft immediately, including incomplete keys that Run must reject. */
+function KeySequenceEditor({ keys, id, invalid, onChange }: { keys: string[]; id: string; invalid: boolean; onChange: (keys: string[]) => void }) {
+  const t = useT();
+  const [active, setActive] = useState<number | null>(null);
+  const insert = (index: number) => {
+    onChange([...keys.slice(0, index), "", ...keys.slice(index)]);
+    setActive(index);
+  };
+  return <div role="group" aria-label={t("ai.approval.keySequence")}>
+    <div className={s.label}>{t("ai.approval.keySequence")}</div>
+    <div className={s.keySequence}>
+      {keys.map((key, index) => {
+        const bad = (key !== "" || invalid) && parseSendKey(key) === null;
+        const label = keyLabel(key, t) || t("ai.approval.keyNumber", { n: index + 1 });
+        const value = key === " " ? "Space" : key;
+        return <div className={s.keySlot} key={index}>
+          <IconButton className={s.keyIcon} icon="plus" label={t("ai.approval.insertKey", { n: index + 1 })} onClick={() => insert(index)} />
+          <div className={cx(s.keyToken, bad && s.keyInvalid)}>
+            {active === index ? <input
+              className={cx(s.input, s.keyInput)}
+              value={value}
+              size={Math.min(18, Math.max(3, value.length))}
+              aria-label={t("ai.approval.keyNumber", { n: index + 1 })}
+              aria-invalid={bad || undefined}
+              title={bad ? t("ai.approval.invalidKey") : undefined}
+              placeholder={t("ai.approval.keyNumber", { n: index + 1 })}
+              list={`${id}-keys`}
+              spellCheck={false}
+              autoFocus
+              onChange={(e) => onChange(keys.map((k, i) => i === index ? e.target.value : k))}
+              onBlur={() => setActive(null)}
+              onKeyDown={(e) => {
+                if (isImeEvent(e)) return;
+                if (e.key === "Escape" || e.key === "Enter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.key === "Escape" || parseSendKey(key) !== null) setActive(null);
+                }
+              }}
+            /> : <button
+              type="button"
+              className={s.keyEdit}
+              aria-label={t("ai.approval.editKey", { n: index + 1, key: label })}
+              aria-invalid={bad || undefined}
+              title={bad ? t("ai.approval.invalidKey") : undefined}
+              onClick={() => setActive(index)}
+            >{label}</button>}
+            {bad && <Icon name="warning-circle" size={12} className={s.keyWarning} />}
+            <IconButton className={s.keyIcon} icon="x" label={t("ai.approval.removeKey", { n: index + 1 })} onClick={() => {
+              onChange(keys.filter((_, i) => i !== index));
+              setActive(null);
+            }} />
+          </div>
+        </div>;
+      })}
+      <Button size="xs" icon="plus" aria-label={t("ai.approval.insertKey", { n: keys.length + 1 })} onClick={() => insert(keys.length)}>{t("ai.approval.addKey")}</Button>
+    </div>
+    <datalist id={`${id}-keys`}>{SEND_KEYS.map((key) => <option key={key} value={key}>{keyLabel(key, t)}</option>)}</datalist>
+  </div>;
+}
+
 /** Where a call stands, from its stored result or the turn (§9: tool running, waiting for approval, …). */
 type CallView =
   | { kind: "result"; entry: ToolEntry }
@@ -1357,7 +1427,7 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
               />
             </>
           )}
-          {kind === "send_input" && <div className={s.meta}>{t("ai.approval.terminalEscapes")}</div>}
+          {kind === "send_input" && readTerminalInput(draft.main, str(args.text)) !== draft.main && <div className={s.meta}>{t("ai.approval.terminalEscapes")}</div>}
           {invalid && <div className={s.fieldError}>{t(kind === "send_input" ? "ai.approval.invalidKey" : "ai.approval.invalidJson")}</div>}
           {kind === "run_command" && (
             <label className={s.inline}>
@@ -1381,22 +1451,7 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
           )}
           {kind === "send_input" && (
             <>
-              {draft.keys.map((key, index, keys) => (
-                <div className={cx(s.inline, s.keyRow)} key={index}>
-                  <label htmlFor={`${call.id}-key-${index}`}>{t("ai.approval.keyNumber", { n: index + 1 })}</label>
-                  <input
-                    id={`${call.id}-key-${index}`}
-                    className={s.input}
-                    value={key}
-                    list={`${call.id}-keys`}
-                    spellCheck={false}
-                    onChange={(e) => { setInvalid(false); setDraft({ ...draft, keys: keys.map((k, i) => i === index ? e.target.value : k) }); }}
-                  />
-                  <IconButton icon="x" label={t("ai.approval.removeKey")} onClick={() => setDraft({ ...draft, keys: keys.filter((_, i) => i !== index) })} />
-                </div>
-              ))}
-              <datalist id={`${call.id}-keys`}>{SEND_KEYS.map((key) => <option key={key} value={key}>{keyLabel(key, t)}</option>)}</datalist>
-              <Button size="sm" icon="plus" onClick={() => setDraft({ ...draft, keys: [...draft.keys, "enter"] })}>{t("ai.approval.addKey")}</Button>
+              <KeySequenceEditor keys={draft.keys} id={call.id} invalid={invalid} onChange={(keys) => { setInvalid(false); setDraft({ ...draft, keys }); }} />
               <div className={s.inline}>
                 {t("ai.approval.wait")}
                 <input className={cx(s.input, s.number)} type="number" min={1} max={120} placeholder="10" value={draft.wait} onChange={(e) => setDraft({ ...draft, wait: e.target.value })} />
@@ -1419,7 +1474,7 @@ function ApprovalCard({ slotId, call, host, mcp, auto }: { slotId: string; call:
             <>
               <ShownInput text={str(args.text) || " "} command terminal />
               <div className={s.meta}>
-                {args.key || (Array.isArray(args.keys) && args.keys.length) ? t("ai.approval.thenKey", { key: [args.key, ...(Array.isArray(args.keys) ? args.keys : [])].filter(Boolean).map((key) => keyLabel(str(key), t)).join(" → ") }) : t("ai.approval.noKey")}
+                {args.key || (Array.isArray(args.keys) && args.keys.length) ? <KeySequence keys={[args.key, ...(Array.isArray(args.keys) ? args.keys : [])].filter(Boolean).map(str)} /> : t("ai.approval.noKey")}
                 {" · "}
                 {t("ai.approval.waitValue", { s: str(args.wait_seconds) || 10 })}
               </div>

@@ -698,16 +698,81 @@
   color: var(--fg2);
 }
 
-.keyRow {
-  flex-wrap: nowrap;
+.keySequence,
+.keySequenceView {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
-.keyRow label {
-  flex: none;
+.keySequenceView {
+  display: inline-flex;
+  vertical-align: middle;
 }
 
-.keyRow .input {
+.keySlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.keyToken {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.keyLabel {
+  padding: 1px 5px;
+}
+
+.keyEdit {
+  min-width: 16px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.keyToken .keyInput {
   flex: 1;
+  width: auto;
+  min-width: 28px;
+  max-width: 160px;
+  height: 25px;
+  padding: 0 5px;
+}
+
+.keySlot .keyIcon {
+  flex: none;
+  width: 22px;
+  height: 25px;
+  font-size: 12px;
+}
+
+.keyInvalid {
+  border-color: var(--red);
+}
+
+.keyWarning {
+  color: var(--red);
+  flex: none;
 }
 
 .fieldError {

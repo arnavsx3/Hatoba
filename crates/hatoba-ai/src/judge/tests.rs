@@ -581,7 +581,10 @@ async fn the_judged_call_says_what_its_tool_does() {
     let p = provider(server.uri(), Protocol::SystemOne);
     let typed = JudgeCall {
         screen_tail: Some("root@web-01:~#".into()),
-        ..JudgeCall::new(SEND_INPUT, json!({"text": "ls -a", "key": "enter"}))
+        ..JudgeCall::new(
+            SEND_INPUT,
+            json!({"text": "ls", "key": "space", "keys": ["-", "a", "enter"]}),
+        )
     };
     let mut state = command_state(&["Run ls -a here"], "ls");
     state.earlier_calls = vec![JudgeCall::new(RUN_COMMAND, json!({"command": "pwd"}))];
@@ -604,6 +607,13 @@ async fn the_judged_call_says_what_its_tool_does() {
     assert_eq!(
         sent["call"]["description"],
         builtin_description(SEND_INPUT).unwrap()
+    );
+    let description = sent["call"]["description"].as_str().unwrap();
+    assert!(description.contains("`key`, then presses `keys` in order"));
+    assert!(description.contains("characters in either key field are typed text"));
+    assert_eq!(
+        sent["call"]["arguments"]["keys"],
+        json!(["-", "a", "enter"])
     );
     // Only the call does: earlier calls stay as they were.
     assert!(sent["earlier_calls"][0].get("description").is_none());

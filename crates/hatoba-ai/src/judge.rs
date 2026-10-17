@@ -315,7 +315,8 @@ pub fn builtin_description(tool: &str) -> Option<&'static str> {
         }
         SEND_INPUT => {
             "Types `text` into a terminal connected to `host`, as the keyboard does, then \
-             presses `key` when it names one. The program reading the terminal, which \
+             presses the optional `key`, then presses `keys` in order. Single printable \
+             characters in either key field are typed text. The program reading the terminal, which \
              `screen_tail` shows, decides what that does: at a shell prompt, text sent with Enter \
              runs as a command line."
         }
